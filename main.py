@@ -28,12 +28,17 @@ TASKS_TO_CLEAN = [
     "Exercise / Gym", "Islamic Reading",
     "Fajr Prayer", "Dhuhr Prayer", "Asr Prayer", "Maghrib Prayer", "Isha Prayer",
     "Jumu'ah Prayer", "Class (Weekly)", "Commute to Class", "Commute Home",
-    "Friday Work Session 1", "Friday Work Session 2"
+    "Friday Work Session 1", "Friday Work Session 2",
+    "Qiyam (Night Prayer)"  # <--- Added to cleanup
 ]
 
-# --- THE DAILY ROUTINE (Weekdays Base) ---
+# --- THE DAILY ROUTINE (Ideal Durations) ---
 routine = {
-    # --- PRAYERS (Extended) ---
+    # --- QIYAM (New) ---
+    # Starts 60 mins before Fajr. Ends exactly at Fajr.
+    "Qiyam (Night Prayer)": {"anchor": "Fajr", "offset": -60, "duration": 60, "color": C_GREEN},
+
+    # --- PRAYERS ---
     "Fajr Prayer":   {"anchor": "Fajr", "offset": 0, "duration": 55, "color": C_GREEN},
     "Dhuhr Prayer":  {"anchor": "Dhuhr", "offset": 0, "duration": 45, "color": C_GREEN},
     "Asr Prayer":    {"anchor": "Asr", "offset": 0, "duration": 45, "color": C_GREEN},
@@ -52,16 +57,11 @@ routine = {
 
     # --- AFTERNOON ---
     "Quran Testing": {"anchor": "Asr", "offset": 50, "duration": 15, "color": C_PEACOCK},
-    
-    # Exercise (30m) - Ends 20m before Maghrib
     "Exercise / Gym": {"anchor": "Maghrib", "offset": -50, "duration": 30, "color": C_GREY},
     
     # --- EVENING ---
-    # Reading (40m) - Fits exactly between Maghrib Prayer & Isha Azan
-    "Islamic Reading": {"anchor": "Maghrib", "offset": 45, "duration": 40, "color": C_PEACOCK},
-    
-    # Work 3 - Starts 5 mins after Isha Prayer block
-    "Work Session 3": {"anchor": "Isha", "offset": 50, "duration": 60, "color": C_RED},
+    "Islamic Reading": {"anchor": "Isha", "offset": 50, "duration": 60, "color": C_PEACOCK},
+    "Work Session 3": {"anchor": "Isha", "offset": 115, "duration": 60, "color": C_RED},
 }
 
 # --- EXCLUSIONS ---
@@ -88,8 +88,7 @@ def cleanup_calendar(service):
             singleEvents=True, pageToken=page_token
         ).execute()
         for event in events_result.get('items', []):
-            summary = event.get('summary', '')
-            if summary in TASKS_TO_CLEAN:
+            if event.get('summary', '') in TASKS_TO_CLEAN or 'Productivity Bot' in event.get('description', ''):
                 try:
                     service.events().delete(calendarId=CALENDAR_ID, eventId=event['id']).execute()
                     time.sleep(0.5)
@@ -127,53 +126,48 @@ def main():
             "Isha": arrow.get(f"{date_str} {timings['Isha']}", "DD MMM YYYY HH:mm", tzinfo='Africa/Cairo'),
         }
 
-        # --- DYNAMIC ADJUSTMENTS ---
+        # --- 1. COLLECT EVENTS ---
+        daily_events = [] 
+
+        def schedule(summary, start, end, color):
+            daily_events.append({'summary': summary, 'start': start, 'end': end, 'colorId': color})
+
+        # Routine Copy
         current_routine = routine.copy()
         
-        # WEEKEND LOGIC
+        # Weekend Adjustments
         if is_weekend:
-            # 1. Reading must move to Dhuhr (Commute blocks Maghrib-Isha)
             current_routine["Islamic Reading"] = {"anchor": "Dhuhr", "offset": 115, "duration": 60, "color": C_PEACOCK}
-            # 2. Morning Shifts
             current_routine["Mutoon Memorization"] = {"anchor": "Fajr", "offset": 60, "duration": 30, "color": C_PEACOCK}
             current_routine["Work Session 1"] = {"anchor": "Fajr", "offset": 95, "duration": 120, "color": C_RED}
             current_routine["Business Development"] = {"anchor": "Fajr", "offset": 220, "duration": 60, "color": C_RED}
             current_routine["Work Session 2"] = {"anchor": "Fajr", "offset": 285, "duration": 120, "color": C_RED}
 
-        # --- SPECIAL FLOWS ---
+        # Special Flows
         if is_friday:
-            # Jumu'ah
-            create_event(service, "Jumu'ah Prayer", anchors["Dhuhr"], anchors["Dhuhr"].shift(minutes=60), C_GREEN)
+            schedule("Jumu'ah Prayer", anchors["Dhuhr"], anchors["Dhuhr"].shift(minutes=60), C_GREEN)
             
-            # Morning Class
-            class_start = arrow.get(f"{date_str} 08:00", "DD MMM YYYY HH:mm", tzinfo='Africa/Cairo')
-            class_end = arrow.get(f"{date_str} 10:00", "DD MMM YYYY HH:mm", tzinfo='Africa/Cairo')
-            create_event(service, "Commute to Class", class_start.shift(hours=-1), class_start, C_GREEN)
-            create_event(service, "Class (Weekly)", class_start, class_end, C_GREEN)
-            create_event(service, "Commute Home", class_end, class_end.shift(hours=1), C_GREEN)
+            c_start = arrow.get(f"{date_str} 08:00", "DD MMM YYYY HH:mm", tzinfo='Africa/Cairo')
+            c_end = arrow.get(f"{date_str} 10:00", "DD MMM YYYY HH:mm", tzinfo='Africa/Cairo')
+            schedule("Commute to Class", c_start.shift(hours=-1), c_start, C_GREEN)
+            schedule("Class (Weekly)", c_start, c_end, C_GREEN)
+            schedule("Commute Home", c_end, c_end.shift(hours=1), C_GREEN)
             
-            # Business
-            biz_start = class_end.shift(hours=1)
-            create_event(service, "Business Development", biz_start, biz_start.shift(minutes=60), C_RED)
+            b_start = c_end.shift(hours=1)
+            schedule("Business Development", b_start, b_start.shift(minutes=60), C_RED)
             
-            # Friday Works
-            work_fri_1_start = anchors["Dhuhr"].shift(minutes=75)
-            create_event(service, "Friday Work Session 1", work_fri_1_start, work_fri_1_start.shift(minutes=60), C_RED)
-            work_fri_2_start = anchors["Isha"].shift(minutes=50)
-            create_event(service, "Friday Work Session 2", work_fri_2_start, work_fri_2_start.shift(minutes=180), C_RED)
+            w1_start = anchors["Dhuhr"].shift(minutes=75)
+            schedule("Friday Work Session 1", w1_start, w1_start.shift(minutes=60), C_RED)
+            w2_start = anchors["Isha"].shift(minutes=50)
+            schedule("Friday Work Session 2", w2_start, w2_start.shift(minutes=180), C_RED)
 
         if is_weekend:
-            # Commute to Class (Starts 1 hour before Class)
-            # Class starts Isha + 15 mins. So Commute starts Isha - 45 mins.
-            # This is roughly 6:15 PM (Between Maghrib and Isha)
-            class_start = anchors["Isha"].shift(minutes=15)
-            commute_start = class_start.shift(minutes=-60)
-            
-            create_event(service, "Commute to Class", commute_start, class_start, C_GREEN)
-            create_event(service, "Class (Weekly)", class_start, class_start.shift(minutes=120), C_GREEN)
-            create_event(service, "Commute Home", class_start.shift(minutes=120), class_start.shift(minutes=180), C_GREEN)
+            c_start = anchors["Isha"].shift(minutes=15)
+            schedule("Commute to Class", c_start.shift(minutes=-60), c_start, C_GREEN)
+            schedule("Class (Weekly)", c_start, c_start.shift(minutes=120), C_GREEN)
+            schedule("Commute Home", c_start.shift(minutes=120), c_start.shift(minutes=180), C_GREEN)
 
-        # --- STANDARD LOOP ---
+        # Process Standard Routine
         for task_name, rules in current_routine.items():
             if is_friday and task_name in FRIDAY_EXCLUSIONS: continue
             if is_weekend and task_name in WEEKEND_EXCLUSIONS: continue
@@ -183,20 +177,38 @@ def main():
             if anchor_time:
                 start_time = anchor_time.shift(minutes=rules['offset'])
                 end_time = start_time.shift(minutes=rules['duration'])
-                create_event(service, task_name, start_time, end_time, rules['color'])
+                schedule(task_name, start_time, end_time, rules['color'])
 
-def create_event(service, summary, start, end, color_id):
-    event = {
-        'summary': summary,
-        'start': {'dateTime': start.isoformat(), 'timeZone': 'Africa/Cairo'},
-        'end': {'dateTime': end.isoformat(), 'timeZone': 'Africa/Cairo'},
-        'description': 'Productivity Bot',
-        'colorId': color_id
-    }
-    try:
-        service.events().insert(calendarId=CALENDAR_ID, body=event).execute()
-        print(f"Added {summary}")
-    except Exception: pass
+        # --- 2. AUTO-TRIM LOGIC ---
+        daily_events.sort(key=lambda x: x['start'])
+
+        for i in range(len(daily_events) - 1):
+            current = daily_events[i]
+            next_ev = daily_events[i+1]
+            
+            # If overlap, cut current
+            if current['end'] > next_ev['start']:
+                # Ensure we don't accidentally cut if they just touch
+                overlap = (current['end'] - next_ev['start']).seconds
+                if overlap > 0:
+                    current['end'] = next_ev['start']
+
+        # --- 3. PUSH TO GOOGLE ---
+        for ev in daily_events:
+            duration_mins = (ev['end'] - ev['start']).seconds / 60
+            if duration_mins < 5: continue # Skip if trimmed to < 5 mins
+
+            final_event = {
+                'summary': ev['summary'],
+                'start': {'dateTime': ev['start'].isoformat(), 'timeZone': 'Africa/Cairo'},
+                'end': {'dateTime': ev['end'].isoformat(), 'timeZone': 'Africa/Cairo'},
+                'description': 'Productivity Bot (Auto-Trimmed)',
+                'colorId': ev['colorId']
+            }
+            try:
+                service.events().insert(calendarId=CALENDAR_ID, body=final_event).execute()
+                print(f"Added {ev['summary']}")
+            except Exception: pass
 
 if __name__ == "__main__":
     main()
