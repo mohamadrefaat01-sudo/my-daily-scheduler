@@ -12,7 +12,18 @@ METHOD = 5  # Egyptian General Authority
 CALENDAR_ID = os.environ.get("CALENDAR_ID")
 SERVICE_ACCOUNT_JSON = os.environ.get("GCP_SA_KEY")
 
-# --- THE ROUTINE (OPTIMIZED ORDER) ---
+# --- LIST OF TASKS TO DELETE (CLEANUP) ---
+# We list ALL names used in previous versions to ensure we catch the old duplicates
+TASKS_TO_CLEAN = [
+    "Mutoon Memorization", "Business Development", 
+    "Deep Work Session 1", "Deep Work Session 2",
+    "Work Session 1", "Work Session 2", "Work Session 3",
+    "Power Nap (Qailulah)", "Quran Memorization", "Quran Testing",
+    "Exercise / Gym", "Islamic Reading",
+    "Fajr Prayer", "Dhuhr Prayer", "Asr Prayer", "Maghrib Prayer", "Isha Prayer"
+]
+
+# --- THE NEW ROUTINE (OPTIMIZED) ---
 routine = {
     # --- PRAYERS ---
     "Fajr Prayer":   {"anchor": "Fajr", "offset": 0, "duration": 20},
@@ -24,20 +35,16 @@ routine = {
     # --- MORNING BLOCK ---
     "Mutoon Memorization": {"anchor": "Fajr", "offset": 30, "duration": 30},
     
-    # 1. SWAPPED: Work Session 1 comes FIRST (High Focus)
-    # Starts 1h 10m after Fajr (e.g., Fajr 5:20 -> Start 6:30)
+    # 1. Work Session 1 (High Focus) - Starts 1h 10m after Fajr
     "Work Session 1": {"anchor": "Fajr", "offset": 70, "duration": 90}, 
     
-    # 2. Business moved to Middle
-    # Starts after Work 1 + 10 min break (e.g., Start 8:10)
+    # 2. Business - Starts after Work 1 + break
     "Business Development": {"anchor": "Fajr", "offset": 170, "duration": 60},
     
     # 3. Work Session 2 (Before Nap)
-    # Starts after Business + 10 min break (e.g., Start 9:20 -> End 10:50)
     "Work Session 2": {"anchor": "Fajr", "offset": 240, "duration": 90}, 
 
     # --- MID-DAY ---
-    # Nap fits perfectly after Work 2 finishes
     "Power Nap (Qailulah)": {"anchor": "Dhuhr", "offset": -45, "duration": 20},
     "Quran Memorization": {"anchor": "Dhuhr", "offset": 25, "duration": 60}, 
 
@@ -48,17 +55,46 @@ routine = {
     # --- EVENING ---
     "Islamic Reading": {"anchor": "Maghrib", "offset": 30, "duration": 60},
     
-    # 4. Night Work Capped at 60 mins
+    # 4. Night Work (Capped at 1h)
     "Work Session 3": {"anchor": "Isha", "offset": 30, "duration": 60},
 }
 
-# Tasks to SKIP on Fridays
 FRIDAY_EXCLUSIONS = ["Mutoon Memorization", "Quran Memorization", "Quran Testing", "Work Session 1", "Work Session 2", "Work Session 3"]
 
 def get_prayer_times():
     today = arrow.now()
     url = f"http://api.aladhan.com/v1/calendarByCity?city={CITY}&country={COUNTRY}&method={METHOD}&month={today.month}&year={today.year}"
     return requests.get(url).json()['data']
+
+def cleanup_calendar(service):
+    """Deletes ALL events created by the bot in the next 30 days to prevent duplicates."""
+    print("🧹 Starting Cleanup... (This may take a moment)")
+    
+    # Look at the next 30 days
+    now = arrow.now('Africa/Cairo').isoformat()
+    future = arrow.now('Africa/Cairo').shift(days=30).isoformat()
+    
+    events_result = service.events().list(
+        calendarId=CALENDAR_ID, timeMin=now, timeMax=future, singleEvents=True
+    ).execute()
+    events = events_result.get('items', [])
+
+    count = 0
+    for event in events:
+        # Check if the event is one of ours
+        # We check if the Title is in our list OR if the description says "Productivity Bot"
+        summary = event.get('summary', '')
+        description = event.get('description', '')
+        
+        if summary in TASKS_TO_CLEAN or 'Productivity Bot' in description:
+            try:
+                service.events().delete(calendarId=CALENDAR_ID, eventId=event['id']).execute()
+                print(f"Deleted: {summary}")
+                count += 1
+            except Exception as e:
+                print(f"Could not delete {summary}: {e}")
+    
+    print(f"✅ Cleanup Complete. Removed {count} old events.")
 
 def main():
     if not SERVICE_ACCOUNT_JSON:
@@ -71,6 +107,10 @@ def main():
     )
     service = build('calendar', 'v3', credentials=creds)
 
+    # 1. RUN CLEANUP FIRST
+    cleanup_calendar(service)
+
+    # 2. FETCH & CREATE NEW SCHEDULE
     print("Fetching Prayer Times...")
     prayer_data = get_prayer_times()
 
