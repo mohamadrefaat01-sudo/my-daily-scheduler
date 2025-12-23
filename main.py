@@ -14,7 +14,7 @@ CALENDAR_ID = os.environ.get("CALENDAR_ID")
 SERVICE_ACCOUNT_JSON = os.environ.get("GCP_SA_KEY")
 
 # --- COLOR PALETTE ---
-# 10=Green, 11=Red, 7=Peacock(Turquoise), 8=Grey
+# 10=Green(Basil), 11=Red(Tomato), 7=Peacock(Turquoise), 8=Grey(Graphite)
 C_GREEN   = "10"
 C_RED     = "11"
 C_PEACOCK = "7" 
@@ -34,30 +34,52 @@ TASKS_TO_CLEAN = [
 
 # --- THE DAILY ROUTINE ---
 routine = {
-    # --- PRAYERS (Green) ---
-    "Fajr Prayer":   {"anchor": "Fajr", "offset": 0, "duration": 20, "color": C_GREEN},
-    "Asr Prayer":    {"anchor": "Asr", "offset": 0, "duration": 20, "color": C_GREEN},
-    "Maghrib Prayer":{"anchor": "Maghrib", "offset": 0, "duration": 20, "color": C_GREEN},
-    "Isha Prayer":   {"anchor": "Isha", "offset": 0, "duration": 20, "color": C_GREEN},
+    # --- PRAYERS (Calculated Durations: Athan + Pray + Athkar) ---
+    # Fajr: 25 wait + 15 pray + 15 athkar = 55 mins
+    "Fajr Prayer":   {"anchor": "Fajr", "offset": 0, "duration": 55, "color": C_GREEN},
+    
+    # Dhuhr: 20 wait + 15 pray + 10 athkar = 45 mins
+    "Dhuhr Prayer":  {"anchor": "Dhuhr", "offset": 0, "duration": 45, "color": C_GREEN},
+    
+    # Asr: 20 wait + 15 pray + 10 athkar = 45 mins
+    "Asr Prayer":    {"anchor": "Asr", "offset": 0, "duration": 45, "color": C_GREEN},
+    
+    # Maghrib: 12 wait + 15 pray + 15 athkar = 42 mins
+    "Maghrib Prayer":{"anchor": "Maghrib", "offset": 0, "duration": 42, "color": C_GREEN},
+    
+    # Isha: 20 wait + 15 pray + 10 athkar = 45 mins
+    "Isha Prayer":   {"anchor": "Isha", "offset": 0, "duration": 45, "color": C_GREEN},
 
-    # --- TASKS ---
-    "Mutoon Memorization": {"anchor": "Fajr", "offset": 30, "duration": 30, "color": C_PEACOCK},
+    # --- TASKS (Offsets shifted to accommodate longer prayers) ---
     
-    # Standard Weekday Work Flow (1.5h + 1h + 1.5h)
-    "Work Session 1": {"anchor": "Fajr", "offset": 70, "duration": 90, "color": C_RED}, 
-    "Business Development": {"anchor": "Fajr", "offset": 170, "duration": 60, "color": C_RED},
-    "Work Session 2": {"anchor": "Fajr", "offset": 240, "duration": 90, "color": C_RED}, 
+    # Mutoon: Starts after Fajr (Offset 60 mins)
+    "Mutoon Memorization": {"anchor": "Fajr", "offset": 60, "duration": 30, "color": C_PEACOCK},
     
+    # Work 1: Starts after Mutoon (Offset 95 mins)
+    "Work Session 1": {"anchor": "Fajr", "offset": 95, "duration": 90, "color": C_RED}, 
+    
+    # Business: Starts after Work 1 (Offset 190 mins)
+    "Business Development": {"anchor": "Fajr", "offset": 190, "duration": 60, "color": C_RED},
+    
+    # Work 2: Starts after Business (Offset 255 mins)
+    "Work Session 2": {"anchor": "Fajr", "offset": 255, "duration": 90, "color": C_RED}, 
+    
+    # Mid-Day
     "Power Nap (Qailulah)": {"anchor": "Dhuhr", "offset": -45, "duration": 20, "color": C_GREEN},
-    "Quran Memorization": {"anchor": "Dhuhr", "offset": 25, "duration": 60, "color": C_PEACOCK}, 
     
-    # Reading (Gap Filler)
-    "Islamic Reading": {"anchor": "Dhuhr", "offset": 90, "duration": 60, "color": C_PEACOCK},
+    # Quran Memo: Starts 50 mins after Dhuhr (Allows for 45m prayer block + 5m buffer)
+    "Quran Memorization": {"anchor": "Dhuhr", "offset": 50, "duration": 60, "color": C_PEACOCK}, 
+    
+    # Reading: Gap Filler
+    "Islamic Reading": {"anchor": "Dhuhr", "offset": 115, "duration": 60, "color": C_PEACOCK},
 
-    "Quran Testing": {"anchor": "Asr", "offset": 25, "duration": 15, "color": C_PEACOCK},
+    # Afternoon
+    # Testing: Starts 50 mins after Asr (Allows for 45m prayer block)
+    "Quran Testing": {"anchor": "Asr", "offset": 50, "duration": 15, "color": C_PEACOCK},
     "Exercise / Gym": {"anchor": "Maghrib", "offset": -90, "duration": 60, "color": C_GREY},
     
-    "Work Session 3": {"anchor": "Isha", "offset": 30, "duration": 60, "color": C_RED},
+    # Night Work: Starts 50 mins after Isha (Allows for 45m prayer block)
+    "Work Session 3": {"anchor": "Isha", "offset": 50, "duration": 60, "color": C_RED},
 }
 
 # --- EXCLUSIONS ---
@@ -134,54 +156,56 @@ def main():
         current_routine = routine.copy()
         
         # WEEKEND COMPRESSION (Sat/Sun)
-        # Goal: Fit 4h Work + 1h Biz in the morning
         if is_weekend:
-            # Start Mutoon earlier (Gap 20 mins after Fajr)
-            current_routine["Mutoon Memorization"] = {"anchor": "Fajr", "offset": 20, "duration": 30, "color": C_PEACOCK}
-            # Work 1: 2 Hours (Starts 50 mins after Fajr)
-            current_routine["Work Session 1"] = {"anchor": "Fajr", "offset": 50, "duration": 120, "color": C_RED}
-            # Biz: 1 Hour (Starts 170 mins after Fajr)
-            current_routine["Business Development"] = {"anchor": "Fajr", "offset": 170, "duration": 60, "color": C_RED}
-            # Work 2: 2 Hours (Starts 230 mins after Fajr)
-            current_routine["Work Session 2"] = {"anchor": "Fajr", "offset": 230, "duration": 120, "color": C_RED}
+            # Shift everything to fit after the 55-min Fajr
+            # Mutoon: Fajr + 60 (same as weekday)
+            current_routine["Mutoon Memorization"] = {"anchor": "Fajr", "offset": 60, "duration": 30, "color": C_PEACOCK}
+            
+            # Work 1: Starts Fajr + 95 (same start) -> Duration 120 (2h)
+            current_routine["Work Session 1"] = {"anchor": "Fajr", "offset": 95, "duration": 120, "color": C_RED}
+            
+            # Biz: Starts Fajr + 220
+            current_routine["Business Development"] = {"anchor": "Fajr", "offset": 220, "duration": 60, "color": C_RED}
+            
+            # Work 2: Starts Fajr + 285 -> Duration 120 (2h)
+            # End = Fajr + 405 mins. (approx 6.75 hours after Fajr). 
+            # If Fajr is 5:20, End is ~12:05 PM. 
+            # Note: This might bump into Dhuhr in winter. On weekends, if it overlaps Dhuhr slightly, prioritize prayer.
+            current_routine["Work Session 2"] = {"anchor": "Fajr", "offset": 285, "duration": 120, "color": C_RED}
 
         # --- SPECIAL FLOWS ---
         
         if is_friday:
-            # 1. Jumu'ah
+            # Jumu'ah (Green) - 60 mins
             create_event(service, "Jumu'ah Prayer", anchors["Dhuhr"], anchors["Dhuhr"].shift(minutes=60), C_GREEN)
             
-            # 2. Morning Class & Commute
+            # Class Logic
             class_start = arrow.get(f"{date_str} 08:00", "DD MMM YYYY HH:mm", tzinfo='Africa/Cairo')
             class_end = arrow.get(f"{date_str} 10:00", "DD MMM YYYY HH:mm", tzinfo='Africa/Cairo')
             create_event(service, "Commute to Class", class_start.shift(hours=-1), class_start, C_GREEN)
             create_event(service, "Class (Weekly)", class_start, class_end, C_GREEN)
             create_event(service, "Commute Home", class_end, class_end.shift(hours=1), C_GREEN)
             
-            # 3. Business (11:00 AM)
+            # Biz
             biz_start = class_end.shift(hours=1)
             create_event(service, "Business Development", biz_start, biz_start.shift(minutes=60), C_RED)
             
-            # 4. MISSING WORK HOURS ADDED HERE
-            # Work Session 1 (1 hr) - After Jumu'ah (approx 1:00-2:00 PM)
-            work_fri_1_start = anchors["Dhuhr"].shift(minutes=70) # 10 min buffer after Jumu'ah
+            # Work 1 (1h) - Starts after Jumu'ah block
+            work_fri_1_start = anchors["Dhuhr"].shift(minutes=75)
             create_event(service, "Friday Work Session 1", work_fri_1_start, work_fri_1_start.shift(minutes=60), C_RED)
             
-            # Work Session 2 (3 hrs) - After Isha (Deep Work)
-            work_fri_2_start = anchors["Isha"].shift(minutes=30)
+            # Work 2 (3h) - Starts after Isha block (Isha + 50)
+            work_fri_2_start = anchors["Isha"].shift(minutes=50)
             create_event(service, "Friday Work Session 2", work_fri_2_start, work_fri_2_start.shift(minutes=180), C_RED)
 
         if is_weekend:
-            # Commute to Class (Maghrib + 20)
+            # Class Logic
             commute_start = anchors["Maghrib"].shift(minutes=20)
             create_event(service, "Commute to Class", commute_start, commute_start.shift(minutes=60), C_GREEN)
             
-            # Class (Isha + 15)
-            class_start = anchors["Isha"].shift(minutes=15)
+            class_start = anchors["Isha"].shift(minutes=20) # Slightly more buffer after Isha
             class_end = class_start.shift(minutes=120)
             create_event(service, "Class (Weekly)", class_start, class_end, C_GREEN)
-            
-            # Commute Home
             create_event(service, "Commute Home", class_end, class_end.shift(minutes=60), C_GREEN)
 
         # --- STANDARD ROUTINE LOOP ---
