@@ -14,7 +14,6 @@ CALENDAR_ID = os.environ.get("CALENDAR_ID")
 SERVICE_ACCOUNT_JSON = os.environ.get("GCP_SA_KEY")
 
 # --- COLOR PALETTE ---
-# 10=Green(Basil), 11=Red(Tomato), 7=Peacock(Turquoise), 8=Grey(Graphite)
 C_GREEN   = "10"
 C_RED     = "11"
 C_PEACOCK = "7" 
@@ -32,53 +31,36 @@ TASKS_TO_CLEAN = [
     "Friday Work Session 1", "Friday Work Session 2"
 ]
 
-# --- THE DAILY ROUTINE ---
+# --- THE DAILY ROUTINE (Weekdays Base) ---
 routine = {
-    # --- PRAYERS (Calculated Durations: Athan + Pray + Athkar) ---
-    # Fajr: 25 wait + 15 pray + 15 athkar = 55 mins
+    # --- PRAYERS (Extended) ---
     "Fajr Prayer":   {"anchor": "Fajr", "offset": 0, "duration": 55, "color": C_GREEN},
-    
-    # Dhuhr: 20 wait + 15 pray + 10 athkar = 45 mins
     "Dhuhr Prayer":  {"anchor": "Dhuhr", "offset": 0, "duration": 45, "color": C_GREEN},
-    
-    # Asr: 20 wait + 15 pray + 10 athkar = 45 mins
     "Asr Prayer":    {"anchor": "Asr", "offset": 0, "duration": 45, "color": C_GREEN},
-    
-    # Maghrib: 12 wait + 15 pray + 15 athkar = 42 mins
     "Maghrib Prayer":{"anchor": "Maghrib", "offset": 0, "duration": 42, "color": C_GREEN},
-    
-    # Isha: 20 wait + 15 pray + 10 athkar = 45 mins
     "Isha Prayer":   {"anchor": "Isha", "offset": 0, "duration": 45, "color": C_GREEN},
 
-    # --- TASKS (Offsets shifted to accommodate longer prayers) ---
-    
-    # Mutoon: Starts after Fajr (Offset 60 mins)
+    # --- MORNING ---
     "Mutoon Memorization": {"anchor": "Fajr", "offset": 60, "duration": 30, "color": C_PEACOCK},
-    
-    # Work 1: Starts after Mutoon (Offset 95 mins)
     "Work Session 1": {"anchor": "Fajr", "offset": 95, "duration": 90, "color": C_RED}, 
-    
-    # Business: Starts after Work 1 (Offset 190 mins)
     "Business Development": {"anchor": "Fajr", "offset": 190, "duration": 60, "color": C_RED},
-    
-    # Work 2: Starts after Business (Offset 255 mins)
     "Work Session 2": {"anchor": "Fajr", "offset": 255, "duration": 90, "color": C_RED}, 
     
-    # Mid-Day
+    # --- MID-DAY ---
     "Power Nap (Qailulah)": {"anchor": "Dhuhr", "offset": -45, "duration": 20, "color": C_GREEN},
-    
-    # Quran Memo: Starts 50 mins after Dhuhr (Allows for 45m prayer block + 5m buffer)
     "Quran Memorization": {"anchor": "Dhuhr", "offset": 50, "duration": 60, "color": C_PEACOCK}, 
-    
-    # Reading: Gap Filler
-    "Islamic Reading": {"anchor": "Dhuhr", "offset": 115, "duration": 60, "color": C_PEACOCK},
 
-    # Afternoon
-    # Testing: Starts 50 mins after Asr (Allows for 45m prayer block)
+    # --- AFTERNOON ---
     "Quran Testing": {"anchor": "Asr", "offset": 50, "duration": 15, "color": C_PEACOCK},
-    "Exercise / Gym": {"anchor": "Maghrib", "offset": -90, "duration": 60, "color": C_GREY},
     
-    # Night Work: Starts 50 mins after Isha (Allows for 45m prayer block)
+    # Exercise (30m) - Ends 20m before Maghrib
+    "Exercise / Gym": {"anchor": "Maghrib", "offset": -50, "duration": 30, "color": C_GREY},
+    
+    # --- EVENING ---
+    # Reading (40m) - Fits exactly between Maghrib Prayer & Isha Azan
+    "Islamic Reading": {"anchor": "Maghrib", "offset": 45, "duration": 40, "color": C_PEACOCK},
+    
+    # Work 3 - Starts 5 mins after Isha Prayer block
     "Work Session 3": {"anchor": "Isha", "offset": 50, "duration": 60, "color": C_RED},
 }
 
@@ -88,7 +70,6 @@ FRIDAY_EXCLUSIONS = [
     "Work Session 1", "Work Session 2", "Work Session 3", 
     "Business Development"
 ]
-
 WEEKEND_EXCLUSIONS = ["Work Session 3"]
 
 def get_prayer_times():
@@ -100,25 +81,19 @@ def cleanup_calendar(service):
     print("🧹 Starting Cleanup...")
     past = arrow.now('Africa/Cairo').shift(days=-5).isoformat()
     future = arrow.now('Africa/Cairo').shift(days=30).isoformat()
-    
     page_token = None
     while True:
         events_result = service.events().list(
             calendarId=CALENDAR_ID, timeMin=past, timeMax=future, 
             singleEvents=True, pageToken=page_token
         ).execute()
-        
-        events = events_result.get('items', [])
-        for event in events:
+        for event in events_result.get('items', []):
             summary = event.get('summary', '')
-            description = event.get('description', '')
-            if summary in TASKS_TO_CLEAN or 'Productivity Bot' in description:
+            if summary in TASKS_TO_CLEAN:
                 try:
                     service.events().delete(calendarId=CALENDAR_ID, eventId=event['id']).execute()
-                    time.sleep(0.5) 
-                except Exception:
-                    pass
-        
+                    time.sleep(0.5)
+                except Exception: pass
         page_token = events_result.get('nextPageToken')
         if not page_token: break
     print("✅ Cleanup Complete.")
@@ -152,63 +127,53 @@ def main():
             "Isha": arrow.get(f"{date_str} {timings['Isha']}", "DD MMM YYYY HH:mm", tzinfo='Africa/Cairo'),
         }
 
-        # --- DYNAMIC ROUTINE ADJUSTMENTS ---
+        # --- DYNAMIC ADJUSTMENTS ---
         current_routine = routine.copy()
         
-        # WEEKEND COMPRESSION (Sat/Sun)
+        # WEEKEND LOGIC
         if is_weekend:
-            # Shift everything to fit after the 55-min Fajr
-            # Mutoon: Fajr + 60 (same as weekday)
+            # 1. Reading must move to Dhuhr (Commute blocks Maghrib-Isha)
+            current_routine["Islamic Reading"] = {"anchor": "Dhuhr", "offset": 115, "duration": 60, "color": C_PEACOCK}
+            # 2. Morning Shifts
             current_routine["Mutoon Memorization"] = {"anchor": "Fajr", "offset": 60, "duration": 30, "color": C_PEACOCK}
-            
-            # Work 1: Starts Fajr + 95 (same start) -> Duration 120 (2h)
             current_routine["Work Session 1"] = {"anchor": "Fajr", "offset": 95, "duration": 120, "color": C_RED}
-            
-            # Biz: Starts Fajr + 220
             current_routine["Business Development"] = {"anchor": "Fajr", "offset": 220, "duration": 60, "color": C_RED}
-            
-            # Work 2: Starts Fajr + 285 -> Duration 120 (2h)
-            # End = Fajr + 405 mins. (approx 6.75 hours after Fajr). 
-            # If Fajr is 5:20, End is ~12:05 PM. 
-            # Note: This might bump into Dhuhr in winter. On weekends, if it overlaps Dhuhr slightly, prioritize prayer.
             current_routine["Work Session 2"] = {"anchor": "Fajr", "offset": 285, "duration": 120, "color": C_RED}
 
         # --- SPECIAL FLOWS ---
-        
         if is_friday:
-            # Jumu'ah (Green) - 60 mins
+            # Jumu'ah
             create_event(service, "Jumu'ah Prayer", anchors["Dhuhr"], anchors["Dhuhr"].shift(minutes=60), C_GREEN)
             
-            # Class Logic
+            # Morning Class
             class_start = arrow.get(f"{date_str} 08:00", "DD MMM YYYY HH:mm", tzinfo='Africa/Cairo')
             class_end = arrow.get(f"{date_str} 10:00", "DD MMM YYYY HH:mm", tzinfo='Africa/Cairo')
             create_event(service, "Commute to Class", class_start.shift(hours=-1), class_start, C_GREEN)
             create_event(service, "Class (Weekly)", class_start, class_end, C_GREEN)
             create_event(service, "Commute Home", class_end, class_end.shift(hours=1), C_GREEN)
             
-            # Biz
+            # Business
             biz_start = class_end.shift(hours=1)
             create_event(service, "Business Development", biz_start, biz_start.shift(minutes=60), C_RED)
             
-            # Work 1 (1h) - Starts after Jumu'ah block
+            # Friday Works
             work_fri_1_start = anchors["Dhuhr"].shift(minutes=75)
             create_event(service, "Friday Work Session 1", work_fri_1_start, work_fri_1_start.shift(minutes=60), C_RED)
-            
-            # Work 2 (3h) - Starts after Isha block (Isha + 50)
             work_fri_2_start = anchors["Isha"].shift(minutes=50)
             create_event(service, "Friday Work Session 2", work_fri_2_start, work_fri_2_start.shift(minutes=180), C_RED)
 
         if is_weekend:
-            # Class Logic
-            commute_start = anchors["Maghrib"].shift(minutes=20)
-            create_event(service, "Commute to Class", commute_start, commute_start.shift(minutes=60), C_GREEN)
+            # Commute to Class (Starts 1 hour before Class)
+            # Class starts Isha + 15 mins. So Commute starts Isha - 45 mins.
+            # This is roughly 6:15 PM (Between Maghrib and Isha)
+            class_start = anchors["Isha"].shift(minutes=15)
+            commute_start = class_start.shift(minutes=-60)
             
-            class_start = anchors["Isha"].shift(minutes=20) # Slightly more buffer after Isha
-            class_end = class_start.shift(minutes=120)
-            create_event(service, "Class (Weekly)", class_start, class_end, C_GREEN)
-            create_event(service, "Commute Home", class_end, class_end.shift(minutes=60), C_GREEN)
+            create_event(service, "Commute to Class", commute_start, class_start, C_GREEN)
+            create_event(service, "Class (Weekly)", class_start, class_start.shift(minutes=120), C_GREEN)
+            create_event(service, "Commute Home", class_start.shift(minutes=120), class_start.shift(minutes=180), C_GREEN)
 
-        # --- STANDARD ROUTINE LOOP ---
+        # --- STANDARD LOOP ---
         for task_name, rules in current_routine.items():
             if is_friday and task_name in FRIDAY_EXCLUSIONS: continue
             if is_weekend and task_name in WEEKEND_EXCLUSIONS: continue
@@ -231,8 +196,7 @@ def create_event(service, summary, start, end, color_id):
     try:
         service.events().insert(calendarId=CALENDAR_ID, body=event).execute()
         print(f"Added {summary}")
-    except Exception:
-        pass
+    except Exception: pass
 
 if __name__ == "__main__":
     main()
