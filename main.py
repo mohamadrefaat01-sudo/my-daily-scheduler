@@ -1,4 +1,5 @@
 import os
+import time
 import json
 import requests
 import arrow
@@ -12,7 +13,14 @@ METHOD = 5  # Egyptian General Authority
 CALENDAR_ID = os.environ.get("CALENDAR_ID")
 SERVICE_ACCOUNT_JSON = os.environ.get("GCP_SA_KEY")
 
-# --- CLEANUP LIST (Includes ALL versions we created) ---
+# --- COLOR PALETTE (Google Calendar IDs) ---
+# 10 = Green (Basil), 11 = Red (Tomato), 9 = Blue (Blueberry), 8 = Grey (Graphite)
+C_GREEN = "10"
+C_RED   = "11"
+C_BLUE  = "9"
+C_GREY  = "8"
+
+# --- CLEANUP LIST ---
 TASKS_TO_CLEAN = [
     "Mutoon Memorization", "Business Development", 
     "Deep Work Session 1", "Deep Work Session 2", 
@@ -22,40 +30,43 @@ TASKS_TO_CLEAN = [
     "Fajr Prayer", "Dhuhr Prayer", "Asr Prayer", "Maghrib Prayer", "Isha Prayer"
 ]
 
-# --- THE OPTIMIZED ROUTINE ---
+# --- THE COLORED ROUTINE ---
 routine = {
-    # --- PRAYERS ---
-    "Fajr Prayer":   {"anchor": "Fajr", "offset": 0, "duration": 20},
-    "Dhuhr Prayer":  {"anchor": "Dhuhr", "offset": 0, "duration": 20},
-    "Asr Prayer":    {"anchor": "Asr", "offset": 0, "duration": 20},
-    "Maghrib Prayer":{"anchor": "Maghrib", "offset": 0, "duration": 20},
-    "Isha Prayer":   {"anchor": "Isha", "offset": 0, "duration": 20},
+    # --- PRAYERS (Green) ---
+    "Fajr Prayer":   {"anchor": "Fajr", "offset": 0, "duration": 20, "color": C_GREEN},
+    "Dhuhr Prayer":  {"anchor": "Dhuhr", "offset": 0, "duration": 20, "color": C_GREEN},
+    "Asr Prayer":    {"anchor": "Asr", "offset": 0, "duration": 20, "color": C_GREEN},
+    "Maghrib Prayer":{"anchor": "Maghrib", "offset": 0, "duration": 20, "color": C_GREEN},
+    "Isha Prayer":   {"anchor": "Isha", "offset": 0, "duration": 20, "color": C_GREEN},
 
     # --- MORNING BLOCK ---
-    "Mutoon Memorization": {"anchor": "Fajr", "offset": 30, "duration": 30},
+    # Mutoon = Blue
+    "Mutoon Memorization": {"anchor": "Fajr", "offset": 30, "duration": 30, "color": C_BLUE},
     
-    # 1. Work Session 1 (High Focus) - Starts 1h 10m after Fajr
-    "Work Session 1": {"anchor": "Fajr", "offset": 70, "duration": 90}, 
-    
-    # 2. Business - Starts after Work 1 + break
-    "Business Development": {"anchor": "Fajr", "offset": 170, "duration": 60},
-    
-    # 3. Work Session 2 (Before Nap)
-    "Work Session 2": {"anchor": "Fajr", "offset": 240, "duration": 90}, 
+    # Work/Business = Red
+    "Work Session 1": {"anchor": "Fajr", "offset": 70, "duration": 90, "color": C_RED}, 
+    "Business Development": {"anchor": "Fajr", "offset": 170, "duration": 60, "color": C_RED},
+    "Work Session 2": {"anchor": "Fajr", "offset": 240, "duration": 90, "color": C_RED}, 
 
     # --- MID-DAY ---
-    "Power Nap (Qailulah)": {"anchor": "Dhuhr", "offset": -45, "duration": 20},
-    "Quran Memorization": {"anchor": "Dhuhr", "offset": 25, "duration": 60}, 
+    # Nap = Green
+    "Power Nap (Qailulah)": {"anchor": "Dhuhr", "offset": -45, "duration": 20, "color": C_GREEN},
+    # Quran Memo = Blue
+    "Quran Memorization": {"anchor": "Dhuhr", "offset": 25, "duration": 60, "color": C_BLUE}, 
+
+    # --- GAP FILLER ---
+    # Reading = Blue
+    "Islamic Reading": {"anchor": "Dhuhr", "offset": 90, "duration": 60, "color": C_BLUE},
 
     # --- AFTERNOON ---
-    "Quran Testing": {"anchor": "Asr", "offset": 25, "duration": 15},
-    "Exercise / Gym": {"anchor": "Maghrib", "offset": -90, "duration": 60},
+    # Testing = Blue
+    "Quran Testing": {"anchor": "Asr", "offset": 25, "duration": 15, "color": C_BLUE},
+    # Gym = Grey
+    "Exercise / Gym": {"anchor": "Maghrib", "offset": -90, "duration": 60, "color": C_GREY},
     
     # --- EVENING ---
-    "Islamic Reading": {"anchor": "Maghrib", "offset": 30, "duration": 60},
-    
-    # 4. Night Work (Capped at 1h)
-    "Work Session 3": {"anchor": "Isha", "offset": 30, "duration": 60},
+    # Night Work = Red
+    "Work Session 3": {"anchor": "Isha", "offset": 30, "duration": 60, "color": C_RED},
 }
 
 FRIDAY_EXCLUSIONS = ["Mutoon Memorization", "Quran Memorization", "Quran Testing", "Work Session 1", "Work Session 2", "Work Session 3"]
@@ -66,24 +77,16 @@ def get_prayer_times():
     return requests.get(url).json()['data']
 
 def cleanup_calendar(service):
-    """Deletes ALL bot events using Pagination to find every single one."""
-    print("🧹 Starting Deep Cleanup... Scanning all pages...")
-    
-    # Look back 5 days to be safe, and forward 30 days
+    print("🧹 Starting Cleanup... (Deleting old uncolored events)")
     past = arrow.now('Africa/Cairo').shift(days=-5).isoformat()
     future = arrow.now('Africa/Cairo').shift(days=30).isoformat()
     
     page_token = None
-    total_deleted = 0
-
+    
     while True:
-        # Fetch a page of events
         events_result = service.events().list(
-            calendarId=CALENDAR_ID, 
-            timeMin=past, 
-            timeMax=future, 
-            singleEvents=True,
-            pageToken=page_token  # This is the key fix
+            calendarId=CALENDAR_ID, timeMin=past, timeMax=future, 
+            singleEvents=True, pageToken=page_token
         ).execute()
         
         events = events_result.get('items', [])
@@ -92,21 +95,19 @@ def cleanup_calendar(service):
             summary = event.get('summary', '')
             description = event.get('description', '')
             
-            # Check if this is a bot event
             if summary in TASKS_TO_CLEAN or 'Productivity Bot' in description:
                 try:
                     service.events().delete(calendarId=CALENDAR_ID, eventId=event['id']).execute()
-                    print(f"Deleted: {summary} ({event['start'].get('dateTime')})")
-                    total_deleted += 1
+                    print(f"Deleted: {summary}")
+                    time.sleep(0.5) # Prevents crashing
                 except Exception as e:
                     print(f"Could not delete {summary}: {e}")
         
-        # Check if there is another page of results
         page_token = events_result.get('nextPageToken')
         if not page_token:
             break
     
-    print(f"✅ Cleanup Complete. Removed {total_deleted} events.")
+    print("✅ Cleanup Complete.")
 
 def main():
     if not SERVICE_ACCOUNT_JSON:
@@ -119,10 +120,8 @@ def main():
     )
     service = build('calendar', 'v3', credentials=creds)
 
-    # 1. RUN DEEP CLEANUP
     cleanup_calendar(service)
 
-    # 2. CREATE NEW SCHEDULE
     print("Fetching Prayer Times...")
     prayer_data = get_prayer_times()
 
@@ -132,8 +131,6 @@ def main():
         for prayer in timings: timings[prayer] = timings[prayer].split(' ')[0]
 
         today_date = arrow.get(date_str, "DD MMM YYYY", tzinfo='Africa/Cairo')
-        
-        # Only schedule from TODAY onwards
         if today_date < arrow.now('Africa/Cairo').shift(days=-1): continue
 
         is_friday = today_date.weekday() == 4
@@ -158,7 +155,8 @@ def main():
                     'summary': task_name,
                     'start': {'dateTime': start_time.isoformat(), 'timeZone': 'Africa/Cairo'},
                     'end': {'dateTime': end_time.isoformat(), 'timeZone': 'Africa/Cairo'},
-                    'description': 'Productivity Bot'
+                    'description': 'Productivity Bot',
+                    'colorId': rules['color']  # <--- THE MAGIC PAINT
                 }
                 
                 try:
