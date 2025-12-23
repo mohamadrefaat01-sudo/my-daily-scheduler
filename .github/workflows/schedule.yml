@@ -1,0 +1,22 @@
+name: Update Prayer Schedule
+on:
+  schedule:
+    - cron: '0 0 1 * *'  # Runs automatically on the 1st of every month
+  workflow_dispatch:      # Allows you to click a button to run it now
+
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.9'
+      - name: Install Libraries
+        run: pip install requests arrow google-auth google-api-python-client
+      - name: Run The Bot
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+          CALENDAR_ID: ${{ secrets.CALENDAR_ID }}
+        run: python main.py
