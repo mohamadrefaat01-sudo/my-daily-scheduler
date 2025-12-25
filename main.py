@@ -29,13 +29,16 @@ TASKS_TO_CLEAN = [
     "Fajr Prayer", "Dhuhr Prayer", "Asr Prayer", "Maghrib Prayer", "Isha Prayer",
     "Jumu'ah Prayer", "Class (Weekly)", "Commute to Class", "Commute Home",
     "Friday Work Session 1", "Friday Work Session 2",
-    "Qiyam (Night Prayer)"  # <--- Added to cleanup
+    "Qiyam (Night Prayer)", "Fixed Quran Reading" # <--- Added New Task
 ]
+
+# --- FIXED QURAN TIMES (Bypass Trimming) ---
+# Format: "HH:mm" (24-hour format)
+FIXED_READINGS = ["05:30", "13:00", "19:30", "23:00"]
 
 # --- THE DAILY ROUTINE (Ideal Durations) ---
 routine = {
-    # --- QIYAM (New) ---
-    # Starts 60 mins before Fajr. Ends exactly at Fajr.
+    # --- QIYAM ---
     "Qiyam (Night Prayer)": {"anchor": "Fajr", "offset": -60, "duration": 60, "color": C_GREEN},
 
     # --- PRAYERS ---
@@ -60,8 +63,10 @@ routine = {
     "Exercise / Gym": {"anchor": "Maghrib", "offset": -50, "duration": 30, "color": C_GREY},
     
     # --- EVENING ---
-    "Islamic Reading": {"anchor": "Isha", "offset": 50, "duration": 60, "color": C_PEACOCK},
-    "Work Session 3": {"anchor": "Isha", "offset": 115, "duration": 60, "color": C_RED},
+    # Moved back to Maghrib (Auto-Trim will cut it if Isha comes early)
+    "Islamic Reading": {"anchor": "Maghrib", "offset": 45, "duration": 60, "color": C_PEACOCK},
+    
+    "Work Session 3": {"anchor": "Isha", "offset": 50, "duration": 60, "color": C_RED},
 }
 
 # --- EXCLUSIONS ---
@@ -126,17 +131,21 @@ def main():
             "Isha": arrow.get(f"{date_str} {timings['Isha']}", "DD MMM YYYY HH:mm", tzinfo='Africa/Cairo'),
         }
 
-        # --- 1. COLLECT EVENTS ---
-        daily_events = [] 
+        # --- 1. COLLECT DYNAMIC EVENTS (For Auto-Trimming) ---
+        dynamic_events = [] 
+        
+        # --- 2. COLLECT FIXED EVENTS (Bypass Auto-Trimming) ---
+        fixed_events = []
 
-        def schedule(summary, start, end, color):
-            daily_events.append({'summary': summary, 'start': start, 'end': end, 'colorId': color})
+        def schedule_dynamic(summary, start, end, color):
+            dynamic_events.append({'summary': summary, 'start': start, 'end': end, 'colorId': color})
 
         # Routine Copy
         current_routine = routine.copy()
         
         # Weekend Adjustments
         if is_weekend:
+            # Move Reading to Dhuhr on weekends to avoid commute clash
             current_routine["Islamic Reading"] = {"anchor": "Dhuhr", "offset": 115, "duration": 60, "color": C_PEACOCK}
             current_routine["Mutoon Memorization"] = {"anchor": "Fajr", "offset": 60, "duration": 30, "color": C_PEACOCK}
             current_routine["Work Session 1"] = {"anchor": "Fajr", "offset": 95, "duration": 120, "color": C_RED}
@@ -145,27 +154,27 @@ def main():
 
         # Special Flows
         if is_friday:
-            schedule("Jumu'ah Prayer", anchors["Dhuhr"], anchors["Dhuhr"].shift(minutes=60), C_GREEN)
+            schedule_dynamic("Jumu'ah Prayer", anchors["Dhuhr"], anchors["Dhuhr"].shift(minutes=60), C_GREEN)
             
             c_start = arrow.get(f"{date_str} 08:00", "DD MMM YYYY HH:mm", tzinfo='Africa/Cairo')
             c_end = arrow.get(f"{date_str} 10:00", "DD MMM YYYY HH:mm", tzinfo='Africa/Cairo')
-            schedule("Commute to Class", c_start.shift(hours=-1), c_start, C_GREEN)
-            schedule("Class (Weekly)", c_start, c_end, C_GREEN)
-            schedule("Commute Home", c_end, c_end.shift(hours=1), C_GREEN)
+            schedule_dynamic("Commute to Class", c_start.shift(hours=-1), c_start, C_GREEN)
+            schedule_dynamic("Class (Weekly)", c_start, c_end, C_GREEN)
+            schedule_dynamic("Commute Home", c_end, c_end.shift(hours=1), C_GREEN)
             
             b_start = c_end.shift(hours=1)
-            schedule("Business Development", b_start, b_start.shift(minutes=60), C_RED)
+            schedule_dynamic("Business Development", b_start, b_start.shift(minutes=60), C_RED)
             
             w1_start = anchors["Dhuhr"].shift(minutes=75)
-            schedule("Friday Work Session 1", w1_start, w1_start.shift(minutes=60), C_RED)
+            schedule_dynamic("Friday Work Session 1", w1_start, w1_start.shift(minutes=60), C_RED)
             w2_start = anchors["Isha"].shift(minutes=50)
-            schedule("Friday Work Session 2", w2_start, w2_start.shift(minutes=180), C_RED)
+            schedule_dynamic("Friday Work Session 2", w2_start, w2_start.shift(minutes=180), C_RED)
 
         if is_weekend:
             c_start = anchors["Isha"].shift(minutes=15)
-            schedule("Commute to Class", c_start.shift(minutes=-60), c_start, C_GREEN)
-            schedule("Class (Weekly)", c_start, c_start.shift(minutes=120), C_GREEN)
-            schedule("Commute Home", c_start.shift(minutes=120), c_start.shift(minutes=180), C_GREEN)
+            schedule_dynamic("Commute to Class", c_start.shift(minutes=-60), c_start, C_GREEN)
+            schedule_dynamic("Class (Weekly)", c_start, c_start.shift(minutes=120), C_GREEN)
+            schedule_dynamic("Commute Home", c_start.shift(minutes=120), c_start.shift(minutes=180), C_GREEN)
 
         # Process Standard Routine
         for task_name, rules in current_routine.items():
@@ -177,33 +186,52 @@ def main():
             if anchor_time:
                 start_time = anchor_time.shift(minutes=rules['offset'])
                 end_time = start_time.shift(minutes=rules['duration'])
-                schedule(task_name, start_time, end_time, rules['color'])
+                schedule_dynamic(task_name, start_time, end_time, rules['color'])
 
-        # --- 2. AUTO-TRIM LOGIC ---
-        daily_events.sort(key=lambda x: x['start'])
+        # --- 3. AUTO-TRIM LOGIC (The Scissor) ---
+        dynamic_events.sort(key=lambda x: x['start'])
 
-        for i in range(len(daily_events) - 1):
-            current = daily_events[i]
-            next_ev = daily_events[i+1]
-            
-            # If overlap, cut current
+        for i in range(len(dynamic_events) - 1):
+            current = dynamic_events[i]
+            next_ev = dynamic_events[i+1]
             if current['end'] > next_ev['start']:
-                # Ensure we don't accidentally cut if they just touch
                 overlap = (current['end'] - next_ev['start']).seconds
                 if overlap > 0:
                     current['end'] = next_ev['start']
 
-        # --- 3. PUSH TO GOOGLE ---
-        for ev in daily_events:
+        # --- 4. PROCESS FIXED QURAN TIMES (Bypass) ---
+        for time_str in FIXED_READINGS:
+            # Parse fixed time for today
+            f_start = arrow.get(f"{date_str} {time_str}", "DD MMM YYYY HH:mm", tzinfo='Africa/Cairo')
+            f_end = f_start.shift(minutes=10)
+            fixed_events.append({
+                'summary': "Fixed Quran Reading",
+                'start': f_start,
+                'end': f_end,
+                'colorId': C_PEACOCK
+            })
+
+        # --- 5. MERGE AND PUSH TO GOOGLE ---
+        all_events = dynamic_events + fixed_events
+        
+        for ev in all_events:
             duration_mins = (ev['end'] - ev['start']).seconds / 60
-            if duration_mins < 5: continue # Skip if trimmed to < 5 mins
+            if duration_mins < 5: continue 
 
             final_event = {
                 'summary': ev['summary'],
                 'start': {'dateTime': ev['start'].isoformat(), 'timeZone': 'Africa/Cairo'},
                 'end': {'dateTime': ev['end'].isoformat(), 'timeZone': 'Africa/Cairo'},
-                'description': 'Productivity Bot (Auto-Trimmed)',
-                'colorId': ev['colorId']
+                'description': 'Productivity Bot',
+                'colorId': ev['colorId'],
+                # --- NEW NOTIFICATION LOGIC ---
+                'reminders': {
+                    'useDefault': False,
+                    'overrides': [
+                        {'method': 'popup', 'minutes': 30},  # 30 mins before
+                        {'method': 'popup', 'minutes': 0}    # At time of event
+                    ]
+                }
             }
             try:
                 service.events().insert(calendarId=CALENDAR_ID, body=final_event).execute()
